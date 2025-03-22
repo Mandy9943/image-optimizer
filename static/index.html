@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Optimizer</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <meta name="description" content="Optimize your images like WhatsApp or Telegram with high quality and small file sizes">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-compress-alt"></i> Image Optimizer</h1>
+            <p class="tagline">Optimize your images with high quality and small file sizes</p>
+        </header>
+
+        <main>
+            <div class="drop-area" id="drop-area">
+                <div class="drop-message">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Drag & drop images here</p>
+                    <p class="or">or</p>
+                    <label class="upload-btn" for="file-input">Browse Files</label>
+                    <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
+                </div>
+                <div class="drop-preview" id="preview-container" style="display: none;">
+                    <div class="preview-header">
+                        <h3>Selected Images (<span id="image-count">0</span>)</h3>
+                        <button id="clear-all" class="clear-btn"><i class="fas fa-trash"></i> Clear All</button>
+                    </div>
+                    <div class="preview-grid" id="preview-grid"></div>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button id="optimize-btn" class="primary-btn" disabled>
+                    <i class="fas fa-magic"></i> Optimize Images
+                </button>
+            </div>
+
+            <div class="results" id="results" style="display: none;">
+                <h2>Optimized Images</h2>
+                <div class="results-grid" id="results-grid"></div>
+                <button id="download-all" class="secondary-btn">
+                    <i class="fas fa-download"></i> Download All
+                </button>
+            </div>
+            
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="spinner"></div>
+                <p>Optimizing your images...</p>
+            </div>
+        </main>
+
+        <footer>
+            <p>Advanced Image Optimization | Powered by Rust</p>
+        </footer>
+    </div>
+
+    <!-- Templates -->
+    <template id="preview-template">
+        <div class="preview-item">
+            <div class="preview-image">
+                <img src="" alt="Preview">
+            </div>
+            <div class="preview-info">
+                <p class="preview-filename"></p>
+                <p class="preview-size"></p>
+            </div>
+            <button class="remove-btn"><i class="fas fa-times"></i></button>
+        </div>
+    </template>
+
+    <template id="result-template">
+        <div class="result-item">
+            <div class="result-image">
+                <img src="" alt="Optimized Image">
+            </div>
+            <div class="result-info">
+                <p class="result-filename"></p>
+                <div class="result-metrics">
+                    <div class="metric">
+                        <span class="label">Original:</span>
+                        <span class="original-size"></span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Optimized:</span>
+                        <span class="optimized-size"></span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Saved:</span>
+                        <span class="compression-ratio"></span>
+                    </div>
+                </div>
+            </div>
+            <a class="download-btn" download><i class="fas fa-download"></i></a>
+        </div>
+    </template>
+
+    <script src="/static/script.js"></script>
+</body>
+</html> 
