@@ -11,11 +11,26 @@
 <body>
     <div class="container">
         <header>
-            <h1><i class="fas fa-compress-alt"></i> Image Optimizer</h1>
-            <p class="tagline">Optimize your images with high quality and small file sizes</p>
+            <h1><i class="fas fa-compress-alt"></i> Image Processor</h1>
+            <p class="tagline">Optimize or rename your images easily</p>
         </header>
 
         <main>
+            <!-- Mode Selection Tabs -->
+            <div class="mode-tabs">
+                <button id="optimize-tab" class="mode-tab active"><i class="fas fa-compress-alt"></i> Optimize Images</button>
+                <button id="rename-tab" class="mode-tab"><i class="fas fa-tag"></i> Rename Images</button>
+            </div>
+
+            <!-- Rename Options (hidden by default) -->
+            <div id="rename-options" class="rename-options" style="display: none;">
+                <div class="rename-field">
+                    <label for="base-name">Base Name for Files:</label>
+                    <input type="text" id="base-name" placeholder="e.g. vacation-photo" value="image">
+                    <p class="helper-text">Images will be named: base-name-0.jpg, base-name-1.jpg, etc.</p>
+                </div>
+            </div>
+
             <div class="drop-area" id="drop-area">
                 <div class="drop-message">
                     <i class="fas fa-cloud-upload-alt"></i>
@@ -34,27 +49,29 @@
             </div>
 
             <div class="action-buttons">
-                <button id="optimize-btn" class="primary-btn" disabled>
+                <button id="process-btn" class="primary-btn" disabled>
                     <i class="fas fa-magic"></i> Optimize Images
                 </button>
             </div>
 
             <div class="results" id="results" style="display: none;">
-                <h2>Optimized Images</h2>
+                <h2>Processed Images</h2>
                 <div class="results-grid" id="results-grid"></div>
-                <button id="download-all" class="secondary-btn">
-                    <i class="fas fa-download"></i> Download All
-                </button>
+                <div class="download-buttons">
+                    <button id="download-all" class="secondary-btn">
+                        <i class="fas fa-download"></i> Download All
+                    </button>
+                </div>
             </div>
             
             <div class="loading-overlay" id="loading-overlay" style="display: none;">
                 <div class="spinner"></div>
-                <p>Optimizing your images...</p>
+                <p id="loading-text">Processing your images...</p>
             </div>
         </main>
 
         <footer>
-            <p>Advanced Image Optimization | Powered by Rust</p>
+            <p>Advanced Image Processing | Powered by Rust</p>
         </footer>
     </div>
 
@@ -75,20 +92,20 @@
     <template id="result-template">
         <div class="result-item">
             <div class="result-image">
-                <img src="" alt="Optimized Image">
+                <img src="" alt="Processed Image">
             </div>
             <div class="result-info">
                 <p class="result-filename"></p>
                 <div class="result-metrics">
-                    <div class="metric">
+                    <div class="metric original-size-row">
                         <span class="label">Original:</span>
                         <span class="original-size"></span>
                     </div>
-                    <div class="metric">
+                    <div class="metric optimized-size-row">
                         <span class="label">Optimized:</span>
                         <span class="optimized-size"></span>
                     </div>
-                    <div class="metric">
+                    <div class="metric compression-row">
                         <span class="label">Saved:</span>
                         <span class="compression-ratio"></span>
                     </div>

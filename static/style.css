@@ -456,4 +456,97 @@ footer {
 .zip-download-btn:hover {
     background-color: #3c5586;
     transform: translateY(-2px);
+}
+
+/* Mode Tabs */
+.mode-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.mode-tab {
+    background-color: var(--white);
+    border: 2px solid var(--border-color);
+    color: var(--light-text);
+    padding: 0.7rem 1.5rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mode-tab:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.mode-tab.active {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    color: var(--white);
+}
+
+/* Rename Options */
+.rename-options {
+    background-color: var(--white);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow);
+}
+
+.rename-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.rename-field label {
+    font-weight: 500;
+}
+
+.rename-field input {
+    padding: 0.7rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+}
+
+.rename-field input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(74, 107, 255, 0.2);
+}
+
+.helper-text {
+    font-size: 0.9rem;
+    color: var(--light-text);
+    margin-top: 0.3rem;
+}
+
+/* Download Buttons Container */
+.download-buttons {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 2rem;
+}
+
+/* Responsive adjustments for mode tabs */
+@media (max-width: 576px) {
+    .mode-tabs {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .mode-tab {
+        width: 100%;
+        justify-content: center;
+    }
 } 

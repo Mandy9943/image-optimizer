@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{Cursor, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use axum::{
@@ -16,7 +17,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
-use tracing::{info, Level};
+use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
 use uuid::Uuid;
 
@@ -27,6 +28,7 @@ mod utils;
 struct AppState {
     temp_dir: PathBuf,
     optimized_dir: PathBuf,
+    rename_counter: AtomicUsize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,6 +93,7 @@ async fn main() {
     let state = Arc::new(AppState {
         temp_dir,
         optimized_dir: optimized_dir_for_state,
+        rename_counter: AtomicUsize::new(0),
     });
 
     // Configure CORS
@@ -103,6 +106,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/api/optimize", post(optimize_handler))
+        .route("/api/rename", post(rename_handler))
         .route("/api/download-zip", get(download_zip_handler))
         .nest_service("/static", ServeDir::new(static_dir))
         .nest_service("/optimized", ServeDir::new(optimized_dir))
@@ -319,12 +323,117 @@ async fn process_field(
     }
 }
 
+// Add this new handler for renaming images without optimization
+async fn rename_handler(
+    State(state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> Result<Json<Vec<OptimizedImage>>, (StatusCode, String)> {
+    let mut results = Vec::new();
+    let mut base_name = String::from("image");
+    let mut image_fields = Vec::new();
+
+    info!("Starting to process rename multipart form data");
+
+    // First pass: extract all fields and process the base name
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let field_name = field.name().unwrap_or("unnamed");
+
+        if field_name == "baseName" {
+            // This is the base name field
+            if let Ok(name_value) = field.text().await {
+                if !name_value.trim().is_empty() {
+                    base_name = name_value.trim().to_string();
+                    info!("Using base name: {}", base_name);
+                }
+            }
+        } else if field_name == "file" || field_name == "files" {
+            // Collect image files for the second pass
+            if let Some(filename) = field.file_name() {
+                // Clone the filename before consuming the field
+                let filename_clone = filename.to_string();
+                info!("Collected file for renaming: {}", filename_clone);
+
+                // Read the file data immediately to avoid issues with field lifetime
+                let data = match field.bytes().await {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        info!("Failed to read file data for {}: {}", filename_clone, e);
+                        continue;
+                    }
+                };
+
+                // Store the filename and data for later processing
+                image_fields.push((filename_clone, data));
+            }
+        }
+    }
+
+    // Second pass: process all collected image fields
+    for (filename, data) in image_fields {
+        info!("Processing file for renaming: {}", filename);
+
+        // Get file extension from original filename
+        let extension = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("jpg")
+            .to_lowercase();
+
+        // Get the next counter value atomically
+        let counter_value = state.rename_counter.fetch_add(1, Ordering::SeqCst);
+
+        // Generate new filename with counter - using the current counter value
+        let new_filename = format!("{}-{}.{}", base_name, counter_value, extension);
+
+        info!(
+            "Generated new filename: {} (global counter now: {})",
+            new_filename,
+            counter_value + 1
+        );
+
+        // Create a unique ID for this file
+        let id = Uuid::new_v4().to_string();
+
+        // Write the file to the optimized directory with the new name
+        let output_path = state.optimized_dir.join(&new_filename);
+        if let Err(e) = tokio::fs::write(&output_path, &data).await {
+            info!("Failed to write renamed file: {}", e);
+            continue;
+        }
+
+        let file_size = data.len() as u64;
+
+        results.push(OptimizedImage {
+            id,
+            filename: new_filename.clone(), // Clone here to prevent move
+            original_size: file_size,
+            optimized_size: file_size, // Same as original for rename only
+            compression_ratio: 0.0,    // No compression for rename only
+            download_url: format!("/optimized/{}", new_filename),
+        });
+    }
+
+    info!(
+        "Completed rename processing, renamed {} images",
+        results.len()
+    );
+
+    if results.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No images were successfully renamed".to_string(),
+        ));
+    }
+
+    Ok(Json(results))
+}
+
 // Handler for downloading all optimized images as a ZIP file
 async fn download_zip_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ZipQuery>,
 ) -> impl IntoResponse {
-    info!("Received request to download optimized images as ZIP");
+    info!("Received request to download images as ZIP");
 
     // Create a buffer to store the ZIP file
     let cursor = Cursor::new(Vec::new());
@@ -336,16 +445,17 @@ async fn download_zip_handler(
         .unix_permissions(0o755);
 
     let mut file_count = 0;
+    let mut included_filenames = Vec::new();
 
     // If specific files are requested, parse them
     let requested_files: Vec<String> = match &params.files {
         Some(files) => {
-            info!("Processing specific files: {}", files);
+            info!("Requested specific files for ZIP: {}", files);
             files.split(',').map(|s| s.to_string()).collect()
         }
         None => {
             // If no files specified, include all files in the optimized directory
-            info!("No specific files requested, including all optimized files");
+            info!("No specific files requested, will include all files in the optimized directory");
             Vec::new()
         }
     };
@@ -355,8 +465,8 @@ async fn download_zip_handler(
     let read_dir = match tokio::fs::read_dir(optimized_dir).await {
         Ok(dir) => dir,
         Err(e) => {
-            info!("Failed to read optimized directory: {}", e);
-            return create_error_response("Failed to read optimized images directory".to_string());
+            info!("Failed to read images directory: {}", e);
+            return create_error_response("Failed to read images directory".to_string());
         }
     };
 
@@ -371,13 +481,28 @@ async fn download_zip_handler(
 
                 // Include only requested files if any were specified
                 if !requested_files.is_empty() && !requested_files.contains(&filename) {
+                    debug!("Skipping file not in requested list: {}", filename);
                     continue;
                 }
 
                 entries.push(entry.path());
+                included_filenames.push(filename.clone());
             }
         }
     }
+
+    if entries.is_empty() {
+        info!("No matching files found for ZIP creation");
+        return create_error_response(
+            "No matching files found for the specified criteria".to_string(),
+        );
+    }
+
+    info!(
+        "Found {} files to include in ZIP: {:?}",
+        entries.len(),
+        included_filenames
+    );
 
     // Add each file to the ZIP
     for path in entries {
@@ -410,7 +535,9 @@ async fn download_zip_handler(
     // Finalize the ZIP file
     if file_count == 0 {
         info!("No files were added to the ZIP");
-        return create_error_response("No images found to include in ZIP file".to_string());
+        return create_error_response(
+            "No images were successfully added to the ZIP file".to_string(),
+        );
     }
 
     let zip_data = match zip.finish() {
@@ -423,8 +550,20 @@ async fn download_zip_handler(
 
     info!("Successfully created ZIP file with {} images", file_count);
 
-    // Create response with appropriate headers
-    let content_disposition = format!("attachment; filename=\"optimized-images.zip\"");
+    // Determine if these are renamed files based on filenames (pattern: name-1.ext)
+    let are_renamed = !included_filenames.is_empty()
+        && included_filenames[0].contains('-')
+        && !included_filenames[0].contains("optimized");
+
+    // Create appropriate content disposition based on whether these are optimized or renamed images
+    let zip_filename = if are_renamed {
+        "renamed-images.zip"
+    } else {
+        "optimized-images.zip"
+    };
+
+    let content_disposition = format!("attachment; filename=\"{}\"", zip_filename);
+    info!("Setting ZIP filename to: {}", zip_filename);
 
     Response::builder()
         .status(StatusCode::OK)

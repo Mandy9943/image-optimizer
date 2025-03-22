@@ -1,7 +1,7 @@
 // DOM Elements
 const dropArea = document.getElementById("drop-area");
 const fileInput = document.getElementById("file-input");
-const optimizeBtn = document.getElementById("optimize-btn");
+const optimizeBtn = document.getElementById("process-btn");
 const clearBtn = document.getElementById("clear-all");
 const previewContainer = document.getElementById("preview-container");
 const previewGrid = document.getElementById("preview-grid");
@@ -12,6 +12,13 @@ const downloadAllBtn = document.getElementById("download-all");
 let downloadZipBtn; // Will be created dynamically
 const loadingOverlay = document.getElementById("loading-overlay");
 
+// Mode tabs and options
+const optimizeTab = document.getElementById("optimize-tab");
+const renameTab = document.getElementById("rename-tab");
+const optimizeOptions = document.getElementById("optimize-options");
+const renameOptions = document.getElementById("rename-options");
+const baseNameInput = document.getElementById("base-name");
+
 // Templates
 const previewTemplate = document.getElementById("preview-template");
 const resultTemplate = document.getElementById("result-template");
@@ -20,10 +27,19 @@ const resultTemplate = document.getElementById("result-template");
 let selectedFiles = [];
 // Optimized images results
 let optimizedResults = [];
+// Current processing mode
+let currentMode = "optimize";
 
 // Initialize the application
 function init() {
   setupEventListeners();
+
+  // Set default mode
+  if (optimizeTab && renameTab) {
+    optimizeTab.classList.add("active");
+    if (renameOptions) renameOptions.style.display = "none";
+    optimizeBtn.textContent = "Optimize Images";
+  }
 }
 
 // Set up all event listeners
@@ -48,9 +64,50 @@ function setupEventListeners() {
   fileInput.addEventListener("change", handleFileInput, false);
 
   // Button clicks
-  optimizeBtn.addEventListener("click", optimizeImages, false);
+  optimizeBtn.addEventListener("click", processImages, false);
   clearBtn.addEventListener("click", clearAllFiles, false);
   downloadAllBtn.addEventListener("click", downloadAllImages, false);
+
+  // Mode tabs
+  if (optimizeTab && renameTab) {
+    optimizeTab.addEventListener("click", function () {
+      setMode("optimize");
+    });
+
+    renameTab.addEventListener("click", function () {
+      setMode("rename");
+    });
+  }
+}
+
+// Set the current processing mode
+function setMode(mode) {
+  currentMode = mode;
+
+  if (mode === "optimize") {
+    optimizeTab.classList.add("active");
+    renameTab.classList.remove("active");
+    if (optimizeOptions) optimizeOptions.style.display = "block";
+    if (renameOptions) renameOptions.style.display = "none";
+    optimizeBtn.textContent = "Optimize Images";
+  } else {
+    renameTab.classList.add("active");
+    optimizeTab.classList.remove("active");
+    if (renameOptions) renameOptions.style.display = "block";
+    if (optimizeOptions) optimizeOptions.style.display = "none";
+    optimizeBtn.textContent = "Rename Images";
+  }
+}
+
+// Process the selected images (optimize or rename based on current mode)
+function processImages() {
+  if (selectedFiles.length === 0) return;
+
+  if (currentMode === "optimize") {
+    optimizeImages();
+  } else {
+    renameImages();
+  }
 }
 
 // Prevent default behaviors for drag and drop
@@ -278,54 +335,140 @@ async function optimizeImages() {
   }
 }
 
-// Display optimization results
+// Rename the selected images
+async function renameImages() {
+  showLoading(true);
+  document.getElementById("loading-text").textContent =
+    "Renaming your images...";
+
+  const files = selectedFiles;
+  const baseName = document.getElementById("base-name").value || "image";
+
+  if (!files || files.length === 0) {
+    alert("Please select at least one image to rename");
+    showLoading(false);
+    return;
+  }
+
+  // Clear any previous results
+  const resultsGrid = document.getElementById("results-grid");
+  resultsGrid.innerHTML = "";
+
+  try {
+    // Create one FormData for all files at once
+    const formData = new FormData();
+    formData.append("baseName", baseName);
+
+    // Add all files to the same form data
+    for (const file of files) {
+      formData.append("files", file);
+    }
+
+    // Send all files in a single request
+    const response = await fetch("/api/rename", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server responded with ${response.status}: ${errorText}`);
+    }
+
+    const results = await response.json();
+    displayResults(results);
+
+    // Add download as ZIP button if we have results
+    if (results.length > 0) {
+      addZipDownloadButton();
+    }
+  } catch (error) {
+    console.error("Error during rename operation:", error);
+    alert(`Failed to rename images: ${error.message}`);
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Display optimization or renaming results
 function displayResults(results) {
+  const resultsSection = document.getElementById("results");
+  const resultsGrid = document.getElementById("results-grid");
+
   // Store the results for later use with ZIP download
   optimizedResults = results;
+
+  // Show the results section
+  resultsSection.style.display = "block";
+
+  // Set the button text based on the current mode
+  const processBtn = document.getElementById("process-btn");
+  if (currentMode === "optimize") {
+    document.querySelector("h2").textContent = "Optimized Images";
+    processBtn.innerHTML = '<i class="fas fa-magic"></i> Optimize Images';
+  } else {
+    document.querySelector("h2").textContent = "Renamed Images";
+    processBtn.innerHTML = '<i class="fas fa-tag"></i> Rename Images';
+  }
 
   // Clear previous results
   resultsGrid.innerHTML = "";
 
-  // Add each result
+  // Add each result to the grid
   results.forEach((result) => {
-    const resultItem = document
-      .importNode(resultTemplate.content, true)
-      .querySelector(".result-item");
+    const resultTemplate = document
+      .getElementById("result-template")
+      .content.cloneNode(true);
 
-    // Set image
-    const img = resultItem.querySelector("img");
-    img.src = result.download_url;
-    img.alt = result.filename;
+    const imgElem = resultTemplate.querySelector("img");
+    imgElem.src = result.download_url;
+    imgElem.alt = result.filename;
 
-    // Set details
-    resultItem.querySelector(".result-filename").textContent = result.filename;
-    resultItem.querySelector(".original-size").textContent = formatFileSize(
-      result.original_size
-    );
-    resultItem.querySelector(".optimized-size").textContent = formatFileSize(
-      result.optimized_size
-    );
-    resultItem.querySelector(
-      ".compression-ratio"
-    ).textContent = `${result.compression_ratio.toFixed(2)}%`;
+    resultTemplate.querySelector(".result-filename").textContent =
+      result.filename;
 
-    // Set download link
-    const downloadLink = resultItem.querySelector(".download-btn");
-    downloadLink.href = result.download_url;
-    downloadLink.download = result.filename;
+    const originalSize = resultTemplate.querySelector(".original-size");
+    originalSize.textContent = formatFileSize(result.original_size);
 
-    // Add to grid
-    resultsGrid.appendChild(resultItem);
+    const optimizedSize = resultTemplate.querySelector(".optimized-size");
+
+    if (currentMode === "optimize") {
+      optimizedSize.textContent = formatFileSize(result.optimized_size);
+
+      const compressionRatio =
+        resultTemplate.querySelector(".compression-ratio");
+      const savedPercentage = (
+        ((result.original_size - result.optimized_size) /
+          result.original_size) *
+        100
+      ).toFixed(1);
+      compressionRatio.textContent = `${savedPercentage}%`;
+    } else {
+      // For rename mode, hide the compression metrics
+      const originalSizeRow =
+        resultTemplate.querySelector(".original-size-row");
+      originalSizeRow.style.display = "none";
+
+      const optimizedSizeRow = resultTemplate.querySelector(
+        ".optimized-size-row"
+      );
+      optimizedSizeRow.style.display = "none";
+
+      const compressionRow = resultTemplate.querySelector(".compression-row");
+      compressionRow.style.display = "none";
+    }
+
+    const downloadBtn = resultTemplate.querySelector(".download-btn");
+    downloadBtn.href = result.download_url;
+    downloadBtn.download = result.filename;
+
+    resultsGrid.appendChild(resultTemplate);
   });
 
-  // Show results container
-  resultsContainer.style.display = "block";
-
-  // Add the download as ZIP button
-  addZipDownloadButton();
-
-  // Scroll to results
-  resultsContainer.scrollIntoView({ behavior: "smooth" });
+  // Add download all button
+  const downloadAllBtn = document.getElementById("download-all");
+  downloadAllBtn.addEventListener("click", downloadAllImages);
+  downloadAllBtn.style.display = "inline-block";
 }
 
 // Add a "Download as ZIP" button to the results section
@@ -354,29 +497,47 @@ function addZipDownloadButton() {
 
 // Download all optimized images as a ZIP file
 function downloadAllAsZip() {
-  if (optimizedResults.length === 0) return;
+  if (optimizedResults.length === 0) {
+    alert("No processed images available to download");
+    return;
+  }
 
   // Show a loading indicator
   showLoading(true);
+  document.getElementById("loading-text").textContent = "Preparing ZIP file...";
 
-  // Get all the file names
-  const filenames = optimizedResults.map((result) => result.filename).join(",");
+  try {
+    // Get all the file names
+    const filenames = optimizedResults
+      .map((result) => result.filename)
+      .join(",");
 
-  // Request the ZIP file from the server
-  const zipUrl = `/api/download-zip?files=${encodeURIComponent(filenames)}`;
+    if (!filenames) {
+      throw new Error("Could not collect filenames for ZIP");
+    }
 
-  // Create a download link
-  const downloadLink = document.createElement("a");
-  downloadLink.href = zipUrl;
-  downloadLink.download = "optimized-images.zip";
+    console.log("Requesting ZIP with files:", filenames);
 
-  // Add the link to the document and click it
-  document.body.appendChild(downloadLink);
-  downloadLink.click();
+    // Request the ZIP file from the server
+    const zipUrl = `/api/download-zip?files=${encodeURIComponent(filenames)}`;
 
-  // Clean up
-  document.body.removeChild(downloadLink);
-  showLoading(false);
+    // Create a download link
+    const downloadLink = document.createElement("a");
+    downloadLink.href = zipUrl;
+    downloadLink.download = "processed-images.zip";
+
+    // Add the link to the document and click it
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+
+    // Clean up
+    document.body.removeChild(downloadLink);
+  } catch (error) {
+    console.error("Error creating ZIP download:", error);
+    alert(`Failed to prepare ZIP file: ${error.message}`);
+  } finally {
+    showLoading(false);
+  }
 }
 
 // Download all optimized images individually
