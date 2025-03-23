@@ -1,40 +1,48 @@
 # Image Optimizer
 
-A powerful web application built with Rust and modern web technologies to optimize images similarly to messaging platforms like Telegram and WhatsApp. The application reduces image file sizes while maintaining good visual quality.
+A fast and efficient web application built with Rust and modern web technologies to optimize images with quality preservation. The application intelligently compresses image file sizes while maintaining good visual quality, similar to how messaging platforms like Telegram and WhatsApp handle image optimization.
 
 ## Features
 
+- **Dual Functionality**: Optimize images or bulk rename them
 - **Drag & Drop Interface**: Easy-to-use interface for uploading multiple images at once
-- **Multi-format Support**: Handles JPEG, PNG, GIF, WebP, and other image formats
-- **Smart Optimization**: Intelligently optimizes each image based on its format
-- **WebP Conversion**: Converts images to WebP for maximum compression with good quality
-- **Responsive Design**: Works on desktop and mobile devices
-- **Batch Processing**: Process multiple images at once
-- **Before/After Comparison**: See the original and optimized file sizes
+- **Multi-format Support**: Handles JPEG, PNG, GIF, WebP, and other common image formats
+- **WebP Conversion**: Optimizes by converting images to the efficient WebP format
+- **Intelligent Resizing**: Automatically resizes images that exceed maximum dimensions
+- **Batch Processing**: Process multiple images simultaneously
+- **Session Management**: Files are organized in unique sessions for better organization
+- **Bulk Download**: Download all processed images as a ZIP archive
+- **Before/After Comparison**: See visual quality and file size differences
+- **Responsive Design**: Works seamlessly on desktop and mobile devices
 
-## Technical Details
+## Technical Architecture
 
-The application consists of two main components:
+The application follows a client-server architecture:
 
-1. **Backend (Rust)**: Handles image processing and optimization using libraries like:
-   - `image` - For basic image manipulation
-   - `mozjpeg` - For high-quality JPEG compression
-   - `webp` - For WebP encoding
-   - `oxipng` - For PNG optimization
-   - `axum` - For the web server framework
+1. **Backend (Rust)**:
+   - Built with the Axum web framework for high performance
+   - Uses Tokio for asynchronous processing
+   - Leverages Rayon for parallel image processing
+   - Implements WebP conversion for optimal compression
+   - Image processing pipeline:
+     - Format detection
+     - Resizing (max 2048×2048)
+     - WebP conversion with quality settings
+   - Session-based file organization
 
-2. **Frontend (HTML/CSS/JS)**: Provides a modern, user-friendly interface with:
-   - Drag and drop functionality
-   - Image previews
-   - Progress indicators
-   - Responsive design
+2. **Frontend (HTML/CSS/JavaScript)**:
+   - Modern, responsive interface
+   - Real-time previews and progress indicators
+   - File drag & drop with browser-native APIs
+   - Modal image viewer with comparison tools
+   - Supports both optimization and batch renaming modes
 
 ## Getting Started
 
 ### Prerequisites
 
 - Rust and Cargo (latest stable version)
-- A modern web browser
+- Modern web browser
 
 ### Installation
 
@@ -59,48 +67,50 @@ The application consists of two main components:
    http://localhost:3000
    ```
 
-## How It Works
+## Usage
 
-1. **Upload**: Drag and drop images onto the interface or use the file picker
-2. **Processing**: Images are sent to the Rust backend where they are:
-   - Analyzed to determine the best optimization strategy
-   - Resized if they exceed maximum dimensions (2048x2048)
-   - Compressed using format-specific optimizations
-   - Converted to WebP if it produces better results
-3. **Results**: Optimized images are displayed with comparison metrics and can be downloaded
+### Optimizing Images
 
-## Optimization Strategies
+1. Drag & drop images onto the interface or use the file picker
+2. Click the "Optimize Images" button to process them
+3. View the before/after comparison and compression statistics
+4. Download individual optimized images or all as a ZIP archive
 
-- **JPEG**: Uses mozjpeg with quality level 80 and progressive encoding
-- **PNG**: Uses oxipng for lossless compression, then converts to WebP for better results
-- **GIF**: Converts to WebP for better compression
-- **WebP**: Re-encodes with optimal parameters if already in WebP format
-- **Other formats**: Converts to WebP as a fallback
+### Renaming Images
+
+1. Switch to the "Rename Images" tab
+2. Set a base name for your files in the input field
+3. Drag & drop images to upload
+4. The app will rename files sequentially (e.g., vacation-1.jpg, vacation-2.jpg)
+5. Download processed files individually or as a ZIP archive
 
 ## Configuration
 
-The application uses sensible defaults that work well for most use cases, but several parameters can be adjusted in the source code:
+The project contains several configurable settings in the `optimizer.rs` file:
 
-- Maximum image dimensions (default: 2048x2048)
-- JPEG quality level (default: 80)
-- WebP quality level (default: 80.0)
-- PNG optimization level (default: 3)
+- `MAX_WIDTH` and `MAX_HEIGHT`: Maximum dimensions for images (default: 2048×2048)
+- `WEBP_QUALITY`: Quality level for WebP conversion (default: 75.0)
+- `PNG_OPTIMIZATION_LEVEL`: Level of PNG optimization (default: 2)
 
 ## Performance Considerations
 
-- Image processing is CPU-intensive, so the application uses `tokio::task::spawn_blocking` for CPU-bound operations
-- For very large images, processing may take longer
-- The server is configured to handle multiple requests concurrently using Tokio's async runtime
+- The application employs Tokio's asynchronous runtime for handling concurrent requests
+- CPU-intensive operations run in separate threads via `spawn_blocking`
+- Rayon is used for parallel processing when appropriate
+- Images are stored in session-specific directories for organization and cleanup
+- WebP conversion provides significant file size reduction while maintaining quality
 
 ## Building for Production
 
-For production deployment, build with optimizations:
+For production deployment:
 
 ```
 cargo build --release
 ```
 
-The optimized binary will be located at `target/release/images-optimizer`
+The optimized binary will be in `target/release/images-optimizer`.
+
+Consider configuring a reverse proxy like Nginx for TLS termination and serving static files.
 
 ## License
 
@@ -109,7 +119,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - [image](https://github.com/image-rs/image) - Rust image processing library
-- [mozjpeg](https://github.com/kornelski/mozjpeg-sys) - Mozilla's JPEG encoder for Rust
 - [webp](https://github.com/jaredforth/webp) - WebP encoding for Rust
 - [oxipng](https://github.com/shssoichiro/oxipng) - PNG optimization tool
-- [axum](https://github.com/tokio-rs/axum) - Web framework 
+- [axum](https://github.com/tokio-rs/axum) - Web framework from the Tokio team
+- [rayon](https://github.com/rayon-rs/rayon) - Data parallelism library for Rust 
