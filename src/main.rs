@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     body::Full,
@@ -31,6 +32,36 @@ struct AppState {
     rename_counter: AtomicUsize,
 }
 
+impl AppState {
+    // Create a new session directory and return its path
+    async fn create_session_dir(&self, operation_type: &str) -> Result<PathBuf, std::io::Error> {
+        // Generate a unique session ID: timestamp + random ID
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let random_id = Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let session_id = format!("{}_{}", timestamp, random_id);
+
+        // Create session dir path: optimized/[operation_type]_[timestamp]_[random_id]
+        let session_dir = self
+            .optimized_dir
+            .join(format!("{}_{}", operation_type, session_id));
+
+        // Create the directory
+        tokio::fs::create_dir_all(&session_dir).await?;
+
+        info!("Created new session directory: {:?}", session_dir);
+        Ok(session_dir)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct OptimizedImage {
     id: String,
@@ -39,11 +70,15 @@ struct OptimizedImage {
     optimized_size: u64,
     compression_ratio: f64,
     download_url: String,
+    // Add new fields to track the session
+    session_id: String,
+    session_path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct ZipQuery {
     files: Option<String>,
+    session: Option<String>,
 }
 
 #[tokio::main]
@@ -136,14 +171,35 @@ async fn optimize_handler(
 ) -> Result<Json<Vec<OptimizedImage>>, (StatusCode, String)> {
     let mut results = Vec::new();
 
-    info!("Starting to process multipart form data");
+    info!("Starting to process multipart form data for optimization");
+
+    // Create a new session directory for this batch of images
+    let session_dir = match state.create_session_dir("optimize").await {
+        Ok(dir) => dir,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create session directory: {}", e),
+            ));
+        }
+    };
+
+    // Extract session ID from path
+    let session_id = session_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown_session")
+        .to_string();
+
+    info!("Using session directory: {}", session_id);
 
     // Process each field individually using a more resilient approach
     while let Ok(Some(field)) = multipart.next_field().await {
         // Process one field at a time, with separate error handling
         info!("Processing a new field from multipart form");
 
-        if let Some(optimized_image) = process_field(field, &state).await {
+        if let Some(optimized_image) = process_field(field, &state, &session_dir, &session_id).await
+        {
             info!(
                 "Successfully optimized image: {:?}",
                 optimized_image.filename
@@ -153,8 +209,9 @@ async fn optimize_handler(
     }
 
     info!(
-        "Completed multipart processing, optimized {} images",
-        results.len()
+        "Completed multipart processing, optimized {} images in session {}",
+        results.len(),
+        session_id
     );
 
     if results.is_empty() {
@@ -171,6 +228,8 @@ async fn optimize_handler(
 async fn process_field(
     field: axum::extract::multipart::Field<'_>,
     state: &Arc<AppState>,
+    session_dir: &PathBuf,
+    session_id: &str,
 ) -> Option<OptimizedImage> {
     // Maximum file size (15MB)
     const MAX_FILE_SIZE: usize = 15 * 1024 * 1024;
@@ -272,7 +331,8 @@ async fn process_field(
         .unwrap_or("image");
 
     let optimized_filename = format!("{}-optimized.webp", file_stem);
-    let output_path = state.optimized_dir.join(&optimized_filename);
+    // Use the session directory instead of the general optimized directory
+    let output_path = session_dir.join(&optimized_filename);
 
     // 9. Get original file size
     let original_size = data.len() as u64;
@@ -298,7 +358,13 @@ async fn process_field(
                 0.0
             };
 
-            let download_url = format!("/optimized/{}", optimized_filename);
+            // Get the relative path from the optimized directory to use in the URL
+            let session_folder_name = session_dir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+
+            let download_url = format!("/optimized/{}/{}", session_folder_name, optimized_filename);
 
             // 12. Remove temporary file
             if let Err(e) = tokio::fs::remove_file(&temp_path).await {
@@ -313,6 +379,8 @@ async fn process_field(
                 optimized_size,
                 compression_ratio,
                 download_url,
+                session_id: session_id.to_string(),
+                session_path: session_folder_name.to_string(),
             })
         }
         Err(e) => {
@@ -333,6 +401,26 @@ async fn rename_handler(
     let mut image_fields = Vec::new();
 
     info!("Starting to process rename multipart form data");
+
+    // Create a new session directory for this batch of rename operations
+    let session_dir = match state.create_session_dir("rename").await {
+        Ok(dir) => dir,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create session directory: {}", e),
+            ));
+        }
+    };
+
+    // Extract session ID from path
+    let session_id = session_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown_session")
+        .to_string();
+
+    info!("Using session directory for renaming: {}", session_id);
 
     // First pass: extract all fields and process the base name
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -394,8 +482,8 @@ async fn rename_handler(
         // Create a unique ID for this file
         let id = Uuid::new_v4().to_string();
 
-        // Write the file to the optimized directory with the new name
-        let output_path = state.optimized_dir.join(&new_filename);
+        // Write the file to the session directory with the new name
+        let output_path = session_dir.join(&new_filename);
         if let Err(e) = tokio::fs::write(&output_path, &data).await {
             info!("Failed to write renamed file: {}", e);
             continue;
@@ -403,19 +491,30 @@ async fn rename_handler(
 
         let file_size = data.len() as u64;
 
+        // Get the relative path from the optimized directory to use in the URL
+        let session_folder_name = session_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+
+        let download_url = format!("/optimized/{}/{}", session_folder_name, new_filename);
+
         results.push(OptimizedImage {
             id,
             filename: new_filename.clone(), // Clone here to prevent move
             original_size: file_size,
             optimized_size: file_size, // Same as original for rename only
             compression_ratio: 0.0,    // No compression for rename only
-            download_url: format!("/optimized/{}", new_filename),
+            download_url,
+            session_id: session_id.to_string(),
+            session_path: session_folder_name.to_string(),
         });
     }
 
     info!(
-        "Completed rename processing, renamed {} images",
-        results.len()
+        "Completed rename processing, renamed {} images in session {}",
+        results.len(),
+        session_id
     );
 
     if results.is_empty() {
@@ -428,7 +527,7 @@ async fn rename_handler(
     Ok(Json(results))
 }
 
-// Handler for downloading all optimized images as a ZIP file
+// Handler for downloading all processed images as a ZIP file
 async fn download_zip_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ZipQuery>,
@@ -447,6 +546,18 @@ async fn download_zip_handler(
     let mut file_count = 0;
     let mut included_filenames = Vec::new();
 
+    // Determine if we're looking for files in a specific session
+    let session_path = match &params.session {
+        Some(session) => {
+            info!("Looking for files in specific session: {}", session);
+            Some(state.optimized_dir.join(session))
+        }
+        None => {
+            info!("No session specified, using general optimized directory");
+            None
+        }
+    };
+
     // If specific files are requested, parse them
     let requested_files: Vec<String> = match &params.files {
         Some(files) => {
@@ -454,29 +565,38 @@ async fn download_zip_handler(
             files.split(',').map(|s| s.to_string()).collect()
         }
         None => {
-            // If no files specified, include all files in the optimized directory
-            info!("No specific files requested, will include all files in the optimized directory");
+            // If no files specified, include all files in the target directory
+            info!("No specific files requested, will include all files in the target directory");
             Vec::new()
         }
     };
 
-    // Read the optimized directory
-    let optimized_dir = &state.optimized_dir;
-    let read_dir = match tokio::fs::read_dir(optimized_dir).await {
+    // Determine which directory to read from
+    let target_dir = match &session_path {
+        Some(session_dir) => session_dir.clone(),
+        None => state.optimized_dir.clone(),
+    };
+
+    info!("Reading files from directory: {:?}", target_dir);
+
+    // Read the target directory
+    let read_dir = match tokio::fs::read_dir(&target_dir).await {
         Ok(dir) => dir,
         Err(e) => {
-            info!("Failed to read images directory: {}", e);
-            return create_error_response("Failed to read images directory".to_string());
+            info!("Failed to read target directory: {}", e);
+            return create_error_response(format!("Failed to read directory: {}", e));
         }
     };
 
     // Collect all files to be included in the ZIP
     let mut entries = Vec::new();
+    let mut session_based = false;
 
     let mut read_dir = read_dir;
     while let Ok(Some(entry)) = read_dir.next_entry().await {
         if let Ok(metadata) = entry.metadata().await {
             if metadata.is_file() {
+                // Direct file in the target directory
                 let filename = entry.file_name().to_string_lossy().to_string();
 
                 // Include only requested files if any were specified
@@ -485,8 +605,32 @@ async fn download_zip_handler(
                     continue;
                 }
 
-                entries.push(entry.path());
-                included_filenames.push(filename.clone());
+                entries.push((entry.path(), filename.clone()));
+                included_filenames.push(filename);
+            } else if metadata.is_dir() && session_path.is_none() {
+                // This is a session directory - look inside if we're not already in a session dir
+                let dir_name = entry.file_name().to_string_lossy().to_string();
+                info!("Found session directory: {}", dir_name);
+
+                // Check if there are any matching files in this session directory
+                let session_files =
+                    match find_files_in_session(&entry.path(), &requested_files).await {
+                        Ok(files) => files,
+                        Err(e) => {
+                            info!("Error reading session directory {}: {}", dir_name, e);
+                            continue;
+                        }
+                    };
+
+                if !session_files.is_empty() {
+                    for (file_path, original_name) in session_files {
+                        // For session-based entries, we'll use the session folder as a prefix in the ZIP
+                        let zip_path = format!("{}/{}", dir_name, original_name);
+                        entries.push((file_path, zip_path.clone()));
+                        included_filenames.push(zip_path);
+                    }
+                    session_based = true;
+                }
             }
         }
     }
@@ -505,21 +649,20 @@ async fn download_zip_handler(
     );
 
     // Add each file to the ZIP
-    for path in entries {
-        let filename = path.file_name().unwrap().to_string_lossy().to_string();
-        info!("Adding file to ZIP: {}", filename);
+    for (path, zip_path) in entries {
+        info!("Adding file to ZIP: {} as {}", path.display(), zip_path);
 
         // Read the file contents
         let file_content = match tokio::fs::read(&path).await {
             Ok(content) => content,
             Err(e) => {
-                info!("Failed to read file {}: {}", filename, e);
+                info!("Failed to read file {}: {}", path.display(), e);
                 continue; // Skip this file but continue with others
             }
         };
 
-        // Add file to ZIP
-        if let Err(e) = zip.start_file(&filename, options) {
+        // Add file to ZIP with the appropriate path
+        if let Err(e) = zip.start_file(&zip_path, options) {
             info!("Failed to start file in ZIP: {}", e);
             continue;
         }
@@ -550,16 +693,22 @@ async fn download_zip_handler(
 
     info!("Successfully created ZIP file with {} images", file_count);
 
-    // Determine if these are renamed files based on filenames (pattern: name-1.ext)
-    let are_renamed = !included_filenames.is_empty()
-        && included_filenames[0].contains('-')
-        && !included_filenames[0].contains("optimized");
-
-    // Create appropriate content disposition based on whether these are optimized or renamed images
-    let zip_filename = if are_renamed {
-        "renamed-images.zip"
+    // Determine appropriate filename for the ZIP
+    let zip_filename = if let Some(session) = &params.session {
+        format!("{}.zip", session)
+    } else if session_based {
+        "all-sessions.zip".to_string()
     } else {
-        "optimized-images.zip"
+        // Determine if these are renamed files based on filenames (pattern: name-1.ext)
+        let are_renamed = !included_filenames.is_empty()
+            && included_filenames[0].contains('-')
+            && !included_filenames[0].contains("optimized");
+
+        if are_renamed {
+            "renamed-images.zip".to_string()
+        } else {
+            "optimized-images.zip".to_string()
+        }
     };
 
     let content_disposition = format!("attachment; filename=\"{}\"", zip_filename);
@@ -573,8 +722,35 @@ async fn download_zip_handler(
         .unwrap_or_else(|_| create_error_response("Failed to create response".to_string()))
 }
 
+// Helper function to find files in a session directory
+async fn find_files_in_session(
+    session_dir: &PathBuf,
+    requested_files: &Vec<String>,
+) -> Result<Vec<(PathBuf, String)>, std::io::Error> {
+    let mut files = Vec::new();
+
+    let mut read_dir = tokio::fs::read_dir(session_dir).await?;
+    while let Some(entry) = read_dir.next_entry().await? {
+        if let Ok(metadata) = entry.metadata().await {
+            if metadata.is_file() {
+                let filename = entry.file_name().to_string_lossy().to_string();
+
+                // Include either all files, or only requested ones
+                if requested_files.is_empty() || requested_files.contains(&filename) {
+                    files.push((entry.path(), filename));
+                }
+            }
+        }
+    }
+
+    Ok(files)
+}
+
 // Helper function to create error responses
-fn create_error_response(message: String) -> Response<Full<Bytes>> {
+fn create_error_response<T: Into<String>>(message: T) -> Response<Full<Bytes>> {
+    let message = message.into();
+    info!("Creating error response: {}", message);
+
     Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
         .header(header::CONTENT_TYPE, "text/plain")

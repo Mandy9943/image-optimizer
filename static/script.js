@@ -507,31 +507,57 @@ function downloadAllAsZip() {
   document.getElementById("loading-text").textContent = "Preparing ZIP file...";
 
   try {
-    // Get all the file names
-    const filenames = optimizedResults
-      .map((result) => result.filename)
-      .join(",");
+    // Check if we have a session ID from the first result
+    const firstResult = optimizedResults[0];
+    const sessionPath = firstResult.session_path;
 
-    if (!filenames) {
-      throw new Error("Could not collect filenames for ZIP");
+    if (sessionPath) {
+      // If we have a session, we can request a ZIP of the entire session
+      console.log("Requesting ZIP for session:", sessionPath);
+
+      const zipUrl = `/api/download-zip?session=${encodeURIComponent(
+        sessionPath
+      )}`;
+
+      // Create a download link
+      const downloadLink = document.createElement("a");
+      downloadLink.href = zipUrl;
+      downloadLink.download = `${sessionPath}.zip`;
+
+      // Add the link to the document and click it
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+
+      // Clean up
+      document.body.removeChild(downloadLink);
+    } else {
+      // Fallback to the previous approach of listing all files
+      // Get all the file names
+      const filenames = optimizedResults
+        .map((result) => result.filename)
+        .join(",");
+
+      if (!filenames) {
+        throw new Error("Could not collect filenames for ZIP");
+      }
+
+      console.log("Requesting ZIP with individual files:", filenames);
+
+      // Request the ZIP file from the server
+      const zipUrl = `/api/download-zip?files=${encodeURIComponent(filenames)}`;
+
+      // Create a download link
+      const downloadLink = document.createElement("a");
+      downloadLink.href = zipUrl;
+      downloadLink.download = "processed-images.zip";
+
+      // Add the link to the document and click it
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+
+      // Clean up
+      document.body.removeChild(downloadLink);
     }
-
-    console.log("Requesting ZIP with files:", filenames);
-
-    // Request the ZIP file from the server
-    const zipUrl = `/api/download-zip?files=${encodeURIComponent(filenames)}`;
-
-    // Create a download link
-    const downloadLink = document.createElement("a");
-    downloadLink.href = zipUrl;
-    downloadLink.download = "processed-images.zip";
-
-    // Add the link to the document and click it
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-
-    // Clean up
-    document.body.removeChild(downloadLink);
   } catch (error) {
     console.error("Error creating ZIP download:", error);
     alert(`Failed to prepare ZIP file: ${error.message}`);
