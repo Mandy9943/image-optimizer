@@ -1,2 +1,10 @@
 /target
 static/optimized
+
+# Docker-related files
+*.tar
+*.tar.gz
+
+# System files
+.DS_Store
+Thumbs.db

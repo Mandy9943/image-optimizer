@@ -1,0 +1,18 @@
+services:
+  images-optimizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3655:3655"
+    volumes:
+      # Volume for persisting optimized images across container restarts
+      - optimized-images:/app/static/optimized
+    restart: unless-stopped
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+
+volumes:
+  optimized-images:
+    driver: local 
