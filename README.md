@@ -1,3 +1,5 @@
+![Image Optimizer App](./static/Screenshot%20from%202025-04-16%2001-11-32.png)
+
 # Image Optimizer
 
 A fast and efficient web application built with Rust and modern web technologies to optimize images with quality preservation. The application intelligently compresses image file sizes while maintaining good visual quality, similar to how messaging platforms like Telegram and WhatsApp handle image optimization.
