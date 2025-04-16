@@ -1,3 +1,5 @@
+![Image Optimizer App](./static/Screenshot%20from%202025-04-16%2001-11-32.png)
+
 # Docker Setup for Image Optimizer
 
 This document provides instructions for running the Image Optimizer application using Docker.
